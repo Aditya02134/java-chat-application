@@ -1,50 +1,53 @@
-//ChatClient is responsible for connection to the server
-//and sending/receving messages
 package Client;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
-import java.net.Socket;
+import java.io.*;   // For input-output streams
+import java.net.*;  // For socket communication
 
+// Client class responsible for connecting to server
 public class ChatClient {
 
-    Socket socket;// Represents connection to server
-    PrintWriter writer;//USed to send the message to server
-    BufferedReader reader;// Used to receive the message from the server
+    private Socket socket;            // Socket connection to server
+    private BufferedReader reader;    // To read messages from server
+    private PrintWriter writer;       // To send messages to server
 
+    // Constructor: connects to server and initializes streams
     public ChatClient(String username) {
 
         try {
-            //Connects to server at localhost on port 6000
-            socket = new Socket("localhost", 6000);
-            //Output Stream = Sending messages to server
-            writer = new PrintWriter(socket.getOutputStream(), true);
-            // Input stream → receiving messages from server
+            // Connect to server running on localhost at port 8000
+            socket = new Socket("localhost", 8000);
+
+            // Input stream (reading messages from server)
             reader = new BufferedReader(
                     new InputStreamReader(socket.getInputStream())
             );
-            // Send username as first message (protocol)
-            // Server expects first message to be username printed on terminal of server
-            writer.println(username);// Sends username to the server
+
+            // Output stream (sending messages to server)
+            writer = new PrintWriter(
+                    socket.getOutputStream(),
+                    true // AUTO FLUSH ensures message is sent immediately
+            );
+
+            // Send username to server as first message
+            writer.println(username);
 
         } catch (Exception e) {
-
             e.printStackTrace();
-
         }
-
     }
-    // Method used by GUI to send message to server
-    public void sendMessage(String msg) {
 
-        writer.println(msg);
+    // Method to send message to server
+    public void sendMessage(String message) {
 
+        // Debug print (can be removed later)
+        System.out.println("SENDING: " + message);
+
+        // Send message to server
+        writer.println(message);
     }
-    // Method used by GUI to receive messages from server
+
+    // Getter method to access reader (used by GUI to receive messages)
     public BufferedReader getReader() {
-
         return reader;
-
     }
 }

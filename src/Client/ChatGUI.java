@@ -1,183 +1,263 @@
-// ChatGUI is the main user interface of the chat application.
-
-// Responsibilities:
-// 1. Display user list
-// 2. Display chat messages
-// 3. Display activity (join/leave)
-// 4. Allow sending private and broadcast messages
-// 5. Handle user selection
-// 6. Continuously receive messages from server using a separate thread
-
-// Key Components:
-// chatArea → displays messages
-// activityArea → shows join/leave
-// userList → shows online users
-// messageField → input box
-
-// Communication:
-// Uses ChatClient to send messages to server
-// Uses a background thread to receive messages
 package Client;
 
-import java.awt.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
+import javax.swing.*;                    // Swing components (GUI)
+import javax.swing.border.EmptyBorder; // For padding around components
+import java.awt.*;                      // Layouts, colors, fonts
+import java.awt.event.*;               // Event handling
 
 public class ChatGUI {
 
-    Frame frame;
+    // Main window frame
+    JFrame frame;
 
-    List userList;//Stores UserList
-    TextArea chatArea;//message area
-    TextArea activityArea;//user joined user left
+    // Model + UI list to display users
+    DefaultListModel<String> userModel;
+    JList<String> userList;
 
-    TextField messageField;//user type message here
-    Button sendButton;
-    Button broadcastButton;
+    // Panel where chat bubbles are added
+    JPanel chatPanel;
+    JScrollPane chatScroll;
 
+    // Activity area for join/leave messages
+    JTextArea activityArea;
+
+    // Input components
+    JTextField messageField;
+    JButton sendButton, broadcastButton, clearButton;
+
+    // Label to show typing indicator
+    JLabel typingLabel;
+
+    // Current user info
     String username;
-    String selectedUser = null;//stores selected user from list used to send private message
+    String selectedUser = null;
 
+    // Client object to communicate with server
     ChatClient client;
 
+    // Constructor
     public ChatGUI(String username, ChatClient client) {
 
         this.username = username;
-        this.client = client;// used later to send message and display the name
+        this.client = client;
 
-        frame = new Frame("Real-Time Chat - User: " + username);
-        frame.setSize(700, 500);
-        frame.setLayout(new BorderLayout());//Divides frame into regions north/south/east/west/center
+        // ================= FRAME SETUP =================
+        frame = new JFrame("Chat - " + username);
+        frame.setSize(750, 550);
+        frame.setLayout(new BorderLayout());
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
-        // LEFT PANEL (USER LIST)
-        Panel leftPanel = new Panel(new BorderLayout());
-        Label userLabel = new Label("Users");
-        userList = new List();//List is a predefined class in Java AWT
-        leftPanel.add(userLabel, BorderLayout.NORTH);
-        leftPanel.add(userList, BorderLayout.CENTER);
+        // ================= LEFT USER LIST =================
+        userModel = new DefaultListModel<>();
+        userList = new JList<>(userModel);
 
-        // RIGHT PANEL
-        Panel rightPanel = new Panel(new BorderLayout());
+        // Set width of user list panel
+        userList.setPreferredSize(new Dimension(120, 0));
 
-        // CHAT AREA
-        chatArea = new TextArea();
-        chatArea.setEditable(false);//There is textarea but user cannot write inside it False=Cant write True= Can Write
+        frame.add(new JScrollPane(userList), BorderLayout.WEST);
 
-        // ACTIVITY AREA
-        activityArea = new TextArea(5, 20);//Shows only 5 Clients then Scroll And Upto 20 characters in a line
+        // ================= CHAT PANEL =================
+        chatPanel = new JPanel();
+
+        // Vertical layout for stacking messages
+        chatPanel.setLayout(new BoxLayout(chatPanel, BoxLayout.Y_AXIS));
+
+        chatScroll = new JScrollPane(chatPanel);
+        frame.add(chatScroll, BorderLayout.CENTER);
+
+        // ================= ACTIVITY AREA =================
+        activityArea = new JTextArea(4, 20);
         activityArea.setEditable(false);
 
-        Panel bottomPanel = new Panel(new BorderLayout());//Divide screen into fixed regions
+        // Light background for distinction
+        activityArea.setBackground(new Color(245,245,245));
 
-        messageField = new TextField();//Creates a single-line input box
-        messageField.setText("");//Sets initial text to empty
-        messageField.setFont(new Font("Arial", Font.PLAIN, 14));//use new keyword Because Font is a class, not a simple value
+        JScrollPane activityScroll = new JScrollPane(activityArea);
+        frame.add(activityScroll, BorderLayout.SOUTH);
 
-        Panel buttonPanel = new Panel(new FlowLayout());//Arrange items in a line (left → right)
+        // ================= INPUT PANEL =================
+        JPanel bottomPanel = new JPanel(new BorderLayout());
 
+        // Message input field
+        messageField = new JTextField();
 
-        sendButton = new Button("Send");//Send Button Private message
-        broadcastButton = new Button("Send to All");//Broadcast Button Send To all
+        // Buttons panel
+        JPanel buttonPanel = new JPanel();
+        sendButton = new JButton("Send");           // Private message
+        broadcastButton = new JButton("Send All");  // Broadcast message
+        clearButton = new JButton("Clear");         // Clear chat
 
-        buttonPanel.add(sendButton); //add Methods adds the button to panel
+        buttonPanel.add(sendButton);
         buttonPanel.add(broadcastButton);
+        buttonPanel.add(clearButton);
 
-        bottomPanel.add(messageField, BorderLayout.CENTER);//“Add messageField in CENTER of bottomPanel”
+        bottomPanel.add(messageField, BorderLayout.CENTER);
         bottomPanel.add(buttonPanel, BorderLayout.EAST);
 
-        rightPanel.add(chatArea, BorderLayout.CENTER);
-        rightPanel.add(activityArea, BorderLayout.SOUTH);
-        rightPanel.add(bottomPanel, BorderLayout.NORTH);
+        // Typing indicator label
+        typingLabel = new JLabel(" ");
+        typingLabel.setForeground(Color.GRAY);
 
-        frame.add(leftPanel, BorderLayout.WEST);
-        frame.add(rightPanel, BorderLayout.CENTER);//If We used East rightPanel becomes VERY SMALL ❌
+        bottomPanel.add(typingLabel, BorderLayout.SOUTH);
+
+        // Add input panel at top
+        frame.add(bottomPanel, BorderLayout.NORTH);
 
         frame.setVisible(true);
 
-        // SELECT USER
-        userList.addItemListener(e -> {
-            selectedUser = userList.getSelectedItem();
+        // ================= EVENTS =================
+
+        // When user selects another user from list
+        userList.addListSelectionListener(e -> {
+            selectedUser = userList.getSelectedValue();
         });
 
-        // SEND PRIVATE MESSAGE
-        sendButton.addActionListener(e -> {
+        // Send private message
+        sendButton.addActionListener(e -> sendMessage());
 
-            String msg = messageField.getText().trim();
-
-            if (msg.isEmpty() || selectedUser == null) return;
-
-            client.sendMessage("PRIVATE:" + selectedUser + ":" + msg);
-
-            chatArea.append("Me → " + selectedUser + ": " + msg + "\n");
-
-            messageField.setText("");// After sending message → clear field
-        });
-
-        // SEND BROADCAST
+        // Send broadcast message
         broadcastButton.addActionListener(e -> {
-
             String msg = messageField.getText().trim();
 
-            if (msg.isEmpty()) return;
-
-            client.sendMessage(msg);
-
-            chatArea.append("Me (All): " + msg + "\n");
-
-            messageField.setText("");// After sending message → clear field
-        });
-
-        // ENTER KEY
-        messageField.addActionListener(e -> sendButton.dispatchEvent(
-                new ActionEvent(sendButton, ActionEvent.ACTION_PERFORMED, "Send")
-        ));
-
-        // WINDOW CLOSE → LOGOUT
-        frame.addWindowListener(new WindowAdapter() {
-            public void windowClosing(WindowEvent e) {
-                client.sendMessage("logout");
-                frame.dispose();
+            if (!msg.isEmpty()) {
+                client.sendMessage(msg);
+                messageField.setText("");
             }
         });
 
-        // 🔥 RECEIVE MESSAGES THREAD (IMPORTANT PART) “Background me continuously server se messages suno”
+        // Clear chat area
+        clearButton.addActionListener(e -> {
+            chatPanel.removeAll();
+            chatPanel.revalidate();
+            chatPanel.repaint();
+        });
+
+        // ================= TYPING INDICATOR =================
+
+        // Timer to avoid sending typing message continuously
+        Timer typingTimer = new Timer(500, e -> {
+            client.sendMessage("TYPING:" + username);
+        });
+        typingTimer.setRepeats(false);
+
+        // Detect typing in text field
+        messageField.addKeyListener(new KeyAdapter() {
+            public void keyTyped(KeyEvent e) {
+                typingTimer.restart();
+            }
+        });
+
+        // ================= RECEIVE THREAD =================
+
+        // Separate thread to receive messages from server
         new Thread(() -> {
             try {
                 String message;
-                while ((message = client.getReader().readLine()) != null) {//“Jab tak server messages bhej raha hai → read karte raho”
 
-                    // ADD USER
+                while ((message = client.getReader().readLine()) != null) {
+
+                    // USER LIST UPDATE
                     if (message.startsWith("USERLIST:")) {
+
                         String user = message.substring(9);
-                        userList.add(user);
-                    }
 
-                    // 🔥 REMOVE USER
-                    else if (message.startsWith("REMOVEUSER:")) {
-                        String user = message.substring(11);
-                        userList.remove(user);
-
-                        if (selectedUser != null && selectedUser.equals(user)) {
-                            selectedUser = null;
-                            chatArea.setText("");
+                        // Avoid duplicate entries
+                        if (!userModel.contains(user)) {
+                            userModel.addElement(user);
                         }
                     }
 
-                    // ACTIVITY
+                    // REMOVE USER
+                    else if (message.startsWith("REMOVEUSER:")) {
+                        userModel.removeElement(message.substring(11));
+                    }
+
+                    // ================= ACTIVITY (JOIN/LEAVE) =================
                     else if (message.contains("joined") || message.contains("left")) {
                         activityArea.append(message + "\n");
                     }
 
-                    // CHAT MESSAGE
+                    // ================= TYPING INDICATOR =================
+                    else if (message.startsWith("TYPING:")) {
+
+                        String user = message.substring(7);
+
+                        if (!user.equals(username)) {
+
+                            typingLabel.setText(user + " is typing...");
+
+                            // Clear after short delay
+                            new Timer(800, e -> typingLabel.setText("")).start();
+                        }
+                    }
+
+                    // ================= CHAT MESSAGE =================
                     else {
-                        chatArea.append(message + "\n");
+                        addBubble(message);
                     }
                 }
 
-            } catch (Exception e) {//“If something goes wrong → don’t crash the program”
-                e.printStackTrace();//Prints error details in console//“Show me what went wrong”
+            } catch (Exception e) {
+                e.printStackTrace();
             }
-        }).start();//Continuously listening to server messages
+        }).start();
+    }
+
+    // ================= SEND PRIVATE MESSAGE =================
+    private void sendMessage() {
+
+        String msg = messageField.getText().trim();
+
+        // Validation: no empty message or no user selected
+        if (msg.isEmpty() || selectedUser == null) return;
+
+        // Send in PRIVATE format
+        client.sendMessage("PRIVATE:" + selectedUser + ":" + msg);
+
+        messageField.setText("");
+    }
+
+    // ================= CHAT BUBBLE =================
+    private void addBubble(String message) {
+
+        // Wrapper panel for alignment
+        JPanel wrapper = new JPanel(new FlowLayout(
+                message.startsWith(username) ? FlowLayout.RIGHT : FlowLayout.LEFT
+        ));
+
+        wrapper.setOpaque(false);
+
+        // Label to display message
+        JLabel label = new JLabel("<html>" + message + "</html>");
+        label.setOpaque(true);
+
+        // Padding inside bubble
+        label.setBorder(new EmptyBorder(5, 10, 5, 10));
+
+        // Limit bubble width (important for UI)
+        label.setMaximumSize(new Dimension(250, Integer.MAX_VALUE));
+
+        // Color based on sender
+        if (message.startsWith(username)) {
+            label.setBackground(new Color(180, 255, 180)); // green (your message)
+        } else {
+            label.setBackground(new Color(230, 230, 230)); // gray (others)
+        }
+
+        wrapper.add(label);
+
+        chatPanel.add(wrapper);
+        chatPanel.revalidate();
+
+        autoScroll();
+    }
+
+    // ================= AUTO SCROLL =================
+    private void autoScroll() {
+
+        SwingUtilities.invokeLater(() -> {
+            JScrollBar vertical = chatScroll.getVerticalScrollBar();
+            vertical.setValue(vertical.getMaximum());
+        });
     }
 }

@@ -1,126 +1,114 @@
-//// ClientHandler handles communication for a single client.
-//// Each client is assigned a separate thread.
-//
-/// / Responsibilities:
-/// / 1. Receive messages from client
-/// / 2. Identify message type (private / broadcast / logout)
-/// / 3. Send messages to appropriate clients
-/// / 4. Maintain user list and notify others about join/leave
-//
-//// Uses:
-//// Socket → connection
-//// BufferedReader → input (client → server)
-//// PrintWriter → output (server → client)
 package Server;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
-import java.net.Socket;
+import java.io.*;       // For input-output streams
+import java.net.*;      // For socket communication
+import java.util.Map;   // For storing client connections
 
+// Thread class to handle communication with one client
 public class ClientHandler extends Thread {
 
-    Socket socket;// Client Connection “Kaunsa client connected hai”
-    PrintWriter writer;// Server → client message bhejne ke liye usage (writer.println(message);)
-    BufferedReader reader;// Client → server message receive karne ke liye usage(reader.readLine();)
+    private Socket socket;                 // Socket for this client
+    private BufferedReader in;             // To read data from client
+    private PrintWriter out;               // To send data to client
+    private String username;               // Username of connected client
 
-    String username;//Stores Clients Name (broadcast(username + ": " + msg);sendPrivateMessage(username, ...))
-//Client (ChatClient)
-//   ↓ sends message
-//Socket
-//   ↓
-//BufferedReader (server reads)
-//   ↓
-//ClientHandler processes
-//   ↓
-//PrintWriter (server sends back)
-    public ClientHandler(Socket socket) {//This constructor runs separately for EACH client
-        this.socket = socket;//“Store THIS client’s socket inside THIS object”without this ClientHandler will not know which client it is handling ❌
+    // Shared map storing username → output stream
+    private Map<String, PrintWriter> clientWriters;
+
+    // Constructor
+    public ClientHandler(Socket socket, Map<String, PrintWriter> clientWriters) {
+        this.socket = socket;
+        this.clientWriters = clientWriters;
     }
-//ChtServer Code Socket socket = serverSocket.accept();
-//
-//ClientHandler handler = new ClientHandler(socket);
-//
-//handler.start();
+
     public void run() {
 
         try {
+            // Initialize input and output streams
+            in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            out = new PrintWriter(socket.getOutputStream(), true);
 
-            reader = new BufferedReader(
-                    new InputStreamReader(socket.getInputStream())
-            );
+            // First message received from client is username
+            username = in.readLine();
 
-            writer = new PrintWriter(socket.getOutputStream(), true);
+            // Add user to map
+            clientWriters.put(username, out);
 
-            // first message = username
-            username = reader.readLine();//Conncected with Chatclient writer.println(username);
-
-            System.out.println(username + " connected");
-
-            // send existing users to new client
-            for (ClientHandler client : ChatServer.clients) {//Chatserver.Clients=Array List of All active users (ClientHandler objects)
-                writer.println("USERLIST:" + client.username);//USERLIST:U2
+            // ================= SEND EXISTING USERS =================
+            // Send list of already connected users to new client
+            for (String user : clientWriters.keySet()) {
+                out.println("USERLIST:" + user);
             }
 
-            // add this client
-            ChatServer.clients.add(this);//“Is new client ko list me add karo”,Chat Server=public static ArrayList<ClientHandler> clients
-
-            // notify all users
-            broadcast("USERLIST:" + username);
-            broadcast(username + " joined the chat");
+            // ================= NOTIFY ALL USERS =================
+            // Inform all users about the new user
+            for (PrintWriter writer : clientWriters.values()) {
+                writer.println("USERLIST:" + username);
+                writer.println(username + " joined the chat");
+            }
 
             String message;
 
-            while ((message = reader.readLine()) != null) {
+            // Continuously read messages from client
+            while ((message = in.readLine()) != null) {
 
-                // LOGOUT
-                if (message.trim().equalsIgnoreCase("logout")) {
+                // Logout condition
+                if (message.equals("##LOGOUT##")) break;
 
-                    ChatServer.clients.remove(this);
-
-                    // 🔥 REMOVE USER FROM LIST
-                    broadcast("REMOVEUSER:" + username);
-
-                    broadcast(username + " left the chat");
-                    break;
-                }
-
-                // PRIVATE MESSAGE
+                // ================= PRIVATE MESSAGE =================
                 if (message.startsWith("PRIVATE:")) {
 
-                    String parts[] = message.split(":", 3);
-
-                    String targetUser = parts[1];
+                    // Format: PRIVATE:targetUser:message
+                    String[] parts = message.split(":", 3);
+                    String target = parts[1];
                     String msg = parts[2];
 
-                    sendPrivateMessage(targetUser, username + " → you: " + msg);
+                    // Get target user's writer
+                    PrintWriter targetWriter = clientWriters.get(target);
+
+                    // Send message to target user
+                    if (targetWriter != null) {
+                        targetWriter.println(username + " → you: " + msg);
+                    }
+
+                    // Show message to sender as confirmation
+                    out.println(username + " → " + target + ": " + msg);
                 }
 
-                // BROADCAST MESSAGE
+                // ================= BROADCAST MESSAGE =================
                 else {
-                    broadcast(username + " (All): " + message);
+
+                    // Format message
+                    String formatted = username + ": " + message;
+
+                    // Send message to all connected clients
+                    for (PrintWriter writer : clientWriters.values()) {
+                        writer.println(formatted);
+                    }
                 }
             }
 
         } catch (Exception e) {
-            System.out.println(username + " disconnected");
+            e.printStackTrace();
         }
-    }
 
-    public void sendPrivateMessage(String targetUser, String message) {
+        finally {
+            try {
+                // Remove user from map
+                clientWriters.remove(username);
 
-        for (ClientHandler client : ChatServer.clients) {
+                // Notify all clients that user has left
+                for (PrintWriter writer : clientWriters.values()) {
+                    writer.println("REMOVEUSER:" + username);
+                    writer.println(username + " left the chat");
+                }
 
-            if (client.username.equals(targetUser)) {
-                client.writer.println(message);
+                // Close socket connection
+                socket.close();
+
+            } catch (Exception e) {
+                e.printStackTrace();
             }
-        }
-    }
-
-    public void broadcast(String message) {
-
-        for (ClientHandler client : ChatServer.clients) {
-            client.writer.println(message);
         }
     }
 }
